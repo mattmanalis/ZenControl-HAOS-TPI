@@ -31,3 +31,7 @@ class ZenControlsCoordinator(DataUpdateCoordinator[dict]):
             return await self.hub.async_refresh_states()
         except Exception as err:
             raise UpdateFailed(str(err)) from err
+
+    async def async_handle_push_update(self) -> None:
+        """Apply state update pushed by multicast events."""
+        self.async_set_updated_data(dict(self.hub.states))

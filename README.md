@@ -11,6 +11,8 @@ Custom Home Assistant integration for Zen Controls via TPI Advanced over UDP (`p
 - `light` entities for discovered groups/gears
 - Dimming and on/off
 - Color capability detection per gear (tunable white + RGB where reported)
+- Group color capability inference from group members (enables group colour temperature and RGB where supported)
+- Near real-time state updates via Zen TPI event multicast (`239.255.90.67:6969`)
 
 ## Install via HACS
 
@@ -28,7 +30,6 @@ Custom Home Assistant integration for Zen Controls via TPI Advanced over UDP (`p
 
 ## Planned next steps
 
-- Add event/multicast listener for near-real-time updates
 - Improve RGBWAF channel mapping
 - Add scene entities/services
 - Add diagnostics + repair flow for connectivity
