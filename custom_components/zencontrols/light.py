@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from homeassistant.components.light import (
@@ -141,11 +142,27 @@ class ZenControlsLightEntity(CoordinatorEntity, LightEntity):
         state = self.coordinator.data.get(self._desc.unique_id)
         return state.rgb_color if state else None
 
+    async def _async_fast_settle_poll(
+        self,
+        predicate,
+        timeout_seconds: int = 6,
+    ) -> None:
+        """Poll quickly after HA-issued commands until expected state is observed."""
+        await self.coordinator.async_request_refresh()
+        for _ in range(timeout_seconds):
+            state = self.coordinator.data.get(self._desc.unique_id)
+            if state is not None and predicate(state):
+                return
+            await asyncio.sleep(1)
+            await self.coordinator.async_request_refresh()
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         uid = self._desc.unique_id
+        target_arc: int | None = None
 
         if ATTR_BRIGHTNESS in kwargs:
             arc = _ha_to_arc_brightness(kwargs[ATTR_BRIGHTNESS])
+            target_arc = arc
             await self._hub.async_set_level(uid, arc)
 
         if ATTR_COLOR_TEMP_KELVIN in kwargs and self._desc.supports_color_temp:
@@ -166,9 +183,21 @@ class ZenControlsLightEntity(CoordinatorEntity, LightEntity):
         if not kwargs:
             # Turn on with a sane default if no explicit level is provided.
             await self._hub.async_set_level(uid, 254)
+            target_arc = 254
 
-        await self.coordinator.async_request_refresh()
+        def _is_on_settled(state) -> bool:
+            if not state.is_on:
+                return False
+            if target_arc is None:
+                return True
+            if state.brightness is None:
+                return False
+            return abs(state.brightness - target_arc) <= 3
+
+        await self._async_fast_settle_poll(_is_on_settled)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._hub.async_turn_off(self._desc.unique_id)
-        await self.coordinator.async_request_refresh()
+        await self._async_fast_settle_poll(
+            lambda state: (not state.is_on) or (state.brightness is not None and state.brightness == 0)
+        )
