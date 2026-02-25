@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Zen Controls",
+        "data": {
+          "host": "Controller host or IP",
+          "port": "TPI port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the controller"
+    },
+    "abort": {
+      "already_configured": "This controller is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Zen Controls options",
+        "data": {
+          "scan_groups": "Discover groups",
+          "scan_gears": "Discover control gear",
+          "timeout": "Request timeout (seconds)",
+          "retries": "Retries per request"
+        }
+      }
+    }
+  }
+}

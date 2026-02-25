@@ -1,0 +1,13 @@
+{
+  "domain": "zencontrols",
+  "name": "Zen Controls TPI",
+  "codeowners": ["@mattmanalis"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/mattmanalis/ZenControl-HAOS-TPI",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/mattmanalis/ZenControl-HAOS-TPI/issues",
+  "loggers": ["custom_components.zencontrols"],
+  "requirements": [],
+  "version": "0.1.0"
+}

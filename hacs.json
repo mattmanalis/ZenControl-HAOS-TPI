@@ -1,0 +1,7 @@
+{
+  "name": "Zen Controls TPI",
+  "content_in_root": false,
+  "domains": ["light"],
+  "homeassistant": "2024.1.0",
+  "render_readme": true
+}
