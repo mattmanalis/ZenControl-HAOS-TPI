@@ -44,6 +44,7 @@ EVENT_MULTICAST_PORT = 6969
 EVENT_LEVEL_CHANGE = 0x03
 EVENT_GROUP_LEVEL_CHANGE = 0x04
 EVENT_COLOUR_CHANGED = 0x08
+EVENT_GROUP_OCCUPANCY = 0x0A
 EVENT_LEVEL_CHANGE_V2 = 0x0B
 
 
@@ -228,6 +229,7 @@ class ZenTPIDeviceHub:
         self.controller_version: str | None = None
         self.entities: dict[str, ZenEntityDescription] = {}
         self.states: dict[str, ZenEntityState] = {}
+        self.group_occupancy: dict[int, bool] = {}
         self._uid_by_address: dict[int, str] = {}
         self._callbacks: list[Callable[[], Awaitable[None]]] = []
         self._event_task: asyncio.Task | None = None
@@ -286,6 +288,7 @@ class ZenTPIDeviceHub:
 
         if self.scan_groups:
             group_numbers = await self._query_group_numbers()
+            self.group_occupancy = {group: False for group in group_numbers}
 
         if self.scan_gears:
             gear_addresses = await self._query_control_gear_addresses()
@@ -559,6 +562,8 @@ class ZenTPIDeviceHub:
             return self._apply_level_event(group_target, payload)
         if event_type == EVENT_COLOUR_CHANGED:
             return self._apply_colour_event(target, payload)
+        if event_type == EVENT_GROUP_OCCUPANCY:
+            return self._apply_group_occupancy_event(target, payload)
         return False
 
     def _apply_level_event(self, address: int, payload: bytes) -> bool:
@@ -593,6 +598,17 @@ class ZenTPIDeviceHub:
             state.color_temp_kelvin = None
             return True
         return False
+
+    def _apply_group_occupancy_event(self, target: int, payload: bytes) -> bool:
+        # Target is usually group + 64 in this event family.
+        group_number = target - 64 if 64 <= target <= 79 else target
+        if group_number not in self.group_occupancy:
+            return False
+        if len(payload) < 2:
+            return False
+        occupied = payload[1] == 0x01
+        self.group_occupancy[group_number] = occupied
+        return True
 
     async def _notify_callbacks(self) -> None:
         for callback in self._callbacks:

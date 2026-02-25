@@ -1,7 +1,7 @@
 """Constants for the Zen Controls integration."""
 
 DOMAIN = "zencontrols"
-PLATFORMS = ["light"]
+PLATFORMS = ["light", "binary_sensor"]
 
 CONF_HOST = "host"
 CONF_PORT = "port"
