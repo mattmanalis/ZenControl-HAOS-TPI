@@ -71,6 +71,7 @@ class ZenControlsLightEntity(CoordinatorEntity, LightEntity):
         self._attr_name = desc.name
 
         self._supported_modes = self._build_supported_modes(desc)
+        self._settle_task: asyncio.Task | None = None
 
         min_kelvin, max_kelvin = hub.get_kelvin_limits(desc.unique_id)
         if min_kelvin is not None and max_kelvin is not None:
@@ -156,6 +157,20 @@ class ZenControlsLightEntity(CoordinatorEntity, LightEntity):
             await asyncio.sleep(1)
             await self.coordinator.async_request_refresh()
 
+    def _start_settle_poll(self, predicate) -> None:
+        if self._settle_task and not self._settle_task.done():
+            self._settle_task.cancel()
+        self._settle_task = self.hass.async_create_task(self._async_fast_settle_poll(predicate))
+
+    def _push_optimistic_state(self, *, is_on: bool, arc_level: int | None = None) -> None:
+        state = self._hub.states.get(self._desc.unique_id)
+        if state is None:
+            return
+        state.is_on = is_on
+        if arc_level is not None:
+            state.brightness = arc_level
+        self.coordinator.async_set_updated_data(dict(self._hub.states))
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         uid = self._desc.unique_id
         target_arc: int | None = None
@@ -185,6 +200,9 @@ class ZenControlsLightEntity(CoordinatorEntity, LightEntity):
             await self._hub.async_set_level(uid, 254)
             target_arc = 254
 
+        optimistic_arc = target_arc if target_arc is not None else self._hub.states.get(uid).brightness if self._hub.states.get(uid) else 254
+        self._push_optimistic_state(is_on=True, arc_level=optimistic_arc)
+
         def _is_on_settled(state) -> bool:
             if not state.is_on:
                 return False
@@ -194,10 +212,11 @@ class ZenControlsLightEntity(CoordinatorEntity, LightEntity):
                 return False
             return abs(state.brightness - target_arc) <= 3
 
-        await self._async_fast_settle_poll(_is_on_settled)
+        self._start_settle_poll(_is_on_settled)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._hub.async_turn_off(self._desc.unique_id)
-        await self._async_fast_settle_poll(
+        self._push_optimistic_state(is_on=False, arc_level=0)
+        self._start_settle_poll(
             lambda state: (not state.is_on) or (state.brightness is not None and state.brightness == 0)
         )
