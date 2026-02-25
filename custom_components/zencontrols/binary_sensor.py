@@ -40,6 +40,17 @@ async def async_setup_entry(
             )
         )
 
+    for pir in hub.pir_entities.values():
+        entities.append(
+            ZenControlsPirBinarySensor(
+                coordinator=coordinator,
+                hub=hub,
+                entry=entry,
+                pir_uid=pir.unique_id,
+                pir_name=pir.name,
+            )
+        )
+
     async_add_entities(entities)
 
 
@@ -82,3 +93,43 @@ class ZenControlsGroupOccupancyBinarySensor(CoordinatorEntity, BinarySensorEntit
     @property
     def available(self) -> bool:
         return super().available and self._group_number in self._hub.group_occupancy
+
+
+class ZenControlsPirBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Represents a Zen PIR occupancy instance state."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.MOTION
+
+    def __init__(
+        self,
+        coordinator,
+        hub,
+        entry: ConfigEntry,
+        pir_uid: str,
+        pir_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub = hub
+        self._entry = entry
+        self._pir_uid = pir_uid
+        self._attr_unique_id = f"{entry.entry_id}_{pir_uid}"
+        self._attr_name = pir_name
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=self._hub.controller_label or "Zen Controls Controller",
+            manufacturer="Zen Controls",
+            model="TPI Advanced",
+            sw_version=self._hub.controller_version,
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._hub.pir_states.get(self._pir_uid, False))
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._pir_uid in self._hub.pir_states

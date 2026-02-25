@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from time import monotonic
 import logging
 import socket
 from typing import Awaitable, Callable
@@ -17,6 +18,7 @@ RESPONSE_ERROR = 0xA3
 
 COMMAND_QUERY_GROUP_LABEL = 0x01
 COMMAND_QUERY_DALI_DEVICE_LABEL = 0x03
+COMMAND_QUERY_INSTANCES_BY_ADDRESS = 0x0D
 COMMAND_QUERY_TPI_EVENT_EMIT_STATE = 0x07
 COMMAND_ENABLE_TPI_EVENT_EMIT = 0x08
 COMMAND_QUERY_GROUP_MEMBERSHIP_BY_ADDRESS = 0x15
@@ -44,9 +46,13 @@ EVENT_MULTICAST_PORT = 6969
 
 EVENT_LEVEL_CHANGE = 0x03
 EVENT_GROUP_LEVEL_CHANGE = 0x04
+EVENT_OCCUPANCY = 0x06
 EVENT_COLOUR_CHANGED = 0x08
 EVENT_GROUP_OCCUPANCY = 0x0A
 EVENT_LEVEL_CHANGE_V2 = 0x0B
+
+INSTANCE_TYPE_OCCUPANCY = 0x03
+PIR_CLEAR_SECONDS = 30.0
 
 
 class ZenTPIError(Exception):
@@ -82,6 +88,17 @@ class ZenEntityState:
     brightness: int | None = None
     color_temp_kelvin: int | None = None
     rgb_color: tuple[int, int, int] | None = None
+
+
+@dataclass(slots=True)
+class ZenPirDescription:
+    """Discovered PIR instance metadata."""
+
+    unique_id: str
+    name: str
+    control_device: int  # 0..63
+    target_address: int  # 64..127
+    instance: int
 
 
 class ZenTPIClient:
@@ -231,6 +248,10 @@ class ZenTPIDeviceHub:
         self.entities: dict[str, ZenEntityDescription] = {}
         self.states: dict[str, ZenEntityState] = {}
         self.group_occupancy: dict[int, bool] = {}
+        self.pir_entities: dict[str, ZenPirDescription] = {}
+        self.pir_states: dict[str, bool] = {}
+        self._pir_expiry: dict[str, float] = {}
+        self._pir_uid_by_target_instance: dict[tuple[int, int], str] = {}
         self._uid_by_address: dict[int, str] = {}
         self._callbacks: list[Callable[[], Awaitable[None]]] = []
         self._event_task: asyncio.Task | None = None
@@ -328,6 +349,8 @@ class ZenTPIDeviceHub:
                         if supports_rgb:
                             caps["supports_rgb"] = True
 
+        await self._discover_pir_instances()
+
         if self.scan_groups:
             for group in group_numbers:
                 label = await self._query_group_label(group)
@@ -374,6 +397,7 @@ class ZenTPIDeviceHub:
             states[uid] = state
 
         self.states = states
+        self._refresh_pir_timeouts()
         await self._refresh_group_occupancy_locked()
 
     async def async_set_level(self, uid: str, level: int) -> None:
@@ -582,6 +606,8 @@ class ZenTPIDeviceHub:
         if event_type == EVENT_GROUP_LEVEL_CHANGE:
             group_target = 64 + target if target < 16 else target
             return self._apply_level_event(group_target, payload)
+        if event_type == EVENT_OCCUPANCY:
+            return self._apply_pir_event(target, payload)
         if event_type == EVENT_COLOUR_CHANGED:
             return self._apply_colour_event(target, payload)
         if event_type == EVENT_GROUP_OCCUPANCY:
@@ -631,6 +657,67 @@ class ZenTPIDeviceHub:
         occupied = payload[1] == 0x01
         self.group_occupancy[group_number] = occupied
         return True
+
+    def _apply_pir_event(self, target: int, payload: bytes) -> bool:
+        # Target for occupancy event is control device address encoded as 64..127.
+        if len(payload) < 1:
+            return False
+        instance = payload[0]
+        uid = self._pir_uid_by_target_instance.get((target, instance))
+        if not uid:
+            return False
+        self.pir_states[uid] = True
+        self._pir_expiry[uid] = monotonic() + PIR_CLEAR_SECONDS
+        return True
+
+    async def _discover_pir_instances(self) -> None:
+        """Discover occupancy instances on control devices (ECD 64..127)."""
+        pir_entities: dict[str, ZenPirDescription] = {}
+        pir_states: dict[str, bool] = {}
+        pir_map: dict[tuple[int, int], str] = {}
+
+        for target in range(64, 128):
+            rtype, payload = await self.client.request_basic(
+                COMMAND_QUERY_INSTANCES_BY_ADDRESS,
+                address=target,
+            )
+            if rtype != RESPONSE_ANSWER or len(payload) < 4:
+                continue
+
+            label = await self._query_gear_label(target)
+            base_name = label or f"Control Device {target - 64}"
+            for i in range(0, len(payload), 4):
+                if i + 3 >= len(payload):
+                    break
+                instance = payload[i]
+                instance_type = payload[i + 1]
+                if instance_type != INSTANCE_TYPE_OCCUPANCY:
+                    continue
+                uid = f"pir_{target - 64}_{instance}"
+                pir_entities[uid] = ZenPirDescription(
+                    unique_id=uid,
+                    name=f"{base_name} PIR {instance}",
+                    control_device=target - 64,
+                    target_address=target,
+                    instance=instance,
+                )
+                pir_states[uid] = False
+                pir_map[(target, instance)] = uid
+
+        self.pir_entities = pir_entities
+        self.pir_states = pir_states
+        self._pir_uid_by_target_instance = pir_map
+        self._pir_expiry = {}
+
+    def _refresh_pir_timeouts(self) -> None:
+        """Auto-clear PIR states when hold time elapses without new events."""
+        if not self._pir_expiry:
+            return
+        now = monotonic()
+        for uid, expiry in list(self._pir_expiry.items()):
+            if now >= expiry:
+                self.pir_states[uid] = False
+                del self._pir_expiry[uid]
 
     async def _notify_callbacks(self) -> None:
         for callback in self._callbacks:

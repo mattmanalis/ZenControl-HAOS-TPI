@@ -10,6 +10,7 @@ Custom Home Assistant integration for Zen Controls via TPI Advanced over UDP (`p
   - DALI control gear
 - `light` entities for discovered groups/gears
 - `binary_sensor` occupancy entities for discovered groups (PIR/group occupancy events)
+- `binary_sensor` motion entities for discovered PIR occupancy instances on control devices
 - Dimming and on/off
 - Color capability detection per gear (tunable white + RGB where reported)
 - Group color capability inference from group members (enables group colour temperature and RGB where supported)
