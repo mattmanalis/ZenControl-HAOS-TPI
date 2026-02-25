@@ -17,6 +17,8 @@ RESPONSE_ERROR = 0xA3
 
 COMMAND_QUERY_GROUP_LABEL = 0x01
 COMMAND_QUERY_DALI_DEVICE_LABEL = 0x03
+COMMAND_QUERY_TPI_EVENT_EMIT_STATE = 0x07
+COMMAND_ENABLE_TPI_EVENT_EMIT = 0x08
 COMMAND_QUERY_GROUP_MEMBERSHIP_BY_ADDRESS = 0x15
 COMMAND_QUERY_GROUP_NUMBERS = 0x09
 COMMAND_DALI_COLOUR = 0x0E
@@ -242,8 +244,10 @@ class ZenTPIDeviceHub:
         """Start multicast event listener for near real-time state updates."""
         if self._event_task and not self._event_task.done():
             return
+        await self._ensure_multicast_events_enabled()
         self._event_stop.clear()
         self._event_task = asyncio.create_task(self._event_listener_loop())
+        _LOGGER.info("ZenControls: multicast listener started on %s:%s", EVENT_MULTICAST_GROUP, EVENT_MULTICAST_PORT)
 
     async def async_stop_events(self) -> None:
         """Stop multicast event listener."""
@@ -531,7 +535,7 @@ class ZenTPIDeviceHub:
         except asyncio.CancelledError:
             raise
         except Exception as err:
-            _LOGGER.debug("Zen multicast listener stopped: %s", err)
+            _LOGGER.warning("ZenControls: multicast listener stopped: %s", err)
         finally:
             sock.close()
 
@@ -596,3 +600,15 @@ class ZenTPIDeviceHub:
                 await callback()
             except Exception:
                 continue
+
+    async def _ensure_multicast_events_enabled(self) -> None:
+        """Try to enable TPI event emission in multicast mode."""
+        try:
+            rtype, payload = await self.client.request_basic(COMMAND_QUERY_TPI_EVENT_EMIT_STATE)
+            if rtype == RESPONSE_ANSWER and len(payload) == 1 and payload[0] == 0x01:
+                return
+            # 0x01 -> enabled, filtering off, unicast off, multicast on
+            await self.client.request_basic(COMMAND_ENABLE_TPI_EVENT_EMIT, address=0x01)
+            _LOGGER.info("ZenControls: requested controller to enable TPI multicast events")
+        except Exception as err:
+            _LOGGER.warning("ZenControls: unable to enable/query TPI multicast events: %s", err)

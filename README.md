@@ -26,7 +26,7 @@ Custom Home Assistant integration for Zen Controls via TPI Advanced over UDP (`p
 
 - Uses local UDP transport only.
 - TCP mode is not required for this integration.
-- Polling interval is currently 10 seconds.
+- Polling interval is currently 5 seconds as a fallback when event push is unavailable.
 
 ## Planned next steps
 
