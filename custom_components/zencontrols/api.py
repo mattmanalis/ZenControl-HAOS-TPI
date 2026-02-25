@@ -21,6 +21,7 @@ COMMAND_QUERY_TPI_EVENT_EMIT_STATE = 0x07
 COMMAND_ENABLE_TPI_EVENT_EMIT = 0x08
 COMMAND_QUERY_GROUP_MEMBERSHIP_BY_ADDRESS = 0x15
 COMMAND_QUERY_GROUP_NUMBERS = 0x09
+COMMAND_QUERY_GROUP_BY_NUMBER = 0x12
 COMMAND_DALI_COLOUR = 0x0E
 COMMAND_QUERY_CONTROL_GEAR_DALI_ADDRESSES = 0x1D
 COMMAND_QUERY_CONTROLLER_VERSION_NUMBER = 0x1C
@@ -373,6 +374,7 @@ class ZenTPIDeviceHub:
             states[uid] = state
 
         self.states = states
+        await self._refresh_group_occupancy_locked()
 
     async def async_set_level(self, uid: str, level: int) -> None:
         """Set DALI arc level (0..254)."""
@@ -450,6 +452,26 @@ class ZenTPIDeviceHub:
             if high_byte & (1 << i):
                 groups.append(i + 8)
         return groups
+
+    async def _refresh_group_occupancy_locked(self) -> None:
+        """Poll current occupancy state for all discovered groups."""
+        if not self.group_occupancy:
+            return
+        for group_number in list(self.group_occupancy.keys()):
+            occupied = await self._query_group_occupancy(group_number)
+            if occupied is not None:
+                self.group_occupancy[group_number] = occupied
+
+    async def _query_group_occupancy(self, group_number: int) -> bool | None:
+        """Query group occupancy using QUERY_GROUP_BY_NUMBER."""
+        rtype, payload = await self.client.request_basic(
+            COMMAND_QUERY_GROUP_BY_NUMBER,
+            address=group_number,
+        )
+        if rtype != RESPONSE_ANSWER or len(payload) < 3:
+            return None
+        # payload: [group_num, occupancy, level]
+        return payload[1] == 0x01
 
     async def _query_control_gear_addresses(self) -> list[int]:
         rtype, payload = await self.client.request_basic(COMMAND_QUERY_CONTROL_GEAR_DALI_ADDRESSES)

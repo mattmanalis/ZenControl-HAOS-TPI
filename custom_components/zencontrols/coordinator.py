@@ -23,6 +23,7 @@ class ZenControlsCoordinator(DataUpdateCoordinator[dict]):
             _LOGGER,
             name="zencontrols",
             update_interval=timedelta(seconds=COORDINATOR_UPDATE_SECONDS),
+            always_update=True,
         )
         self.hub = hub
 
